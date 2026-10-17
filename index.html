@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TabMerger</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark">⇄</span>
+      <h1>TabMerger</h1>
+    </div>
+    <p class="tagline">Consolidate same-header spreadsheets into one file — entirely in your browser. Nothing is uploaded anywhere.</p>
+  </header>
+
+  <main class="layout">
+    <section class="panel input-panel">
+      <div class="mode-tabs" role="tablist">
+        <button class="mode-tab active" data-mode="workbook" role="tab" aria-selected="true">
+          One workbook, multiple tabs
+        </button>
+        <button class="mode-tab" data-mode="files" role="tab" aria-selected="false">
+          Multiple files / a folder
+        </button>
+      </div>
+
+      <div class="mode-panel" id="mode-workbook">
+        <p class="mode-hint">Drop a single .xlsx/.xls file. Every sheet inside it will be treated as a source to merge.</p>
+        <div class="dropzone" id="dropzone-workbook" tabindex="0">
+          <div class="dropzone-icon">📄</div>
+          <div class="dropzone-text">Drag &amp; drop a workbook here<br/>or <span class="link-like">browse</span></div>
+          <input type="file" id="file-input-workbook" accept=".xlsx,.xls" hidden />
+        </div>
+      </div>
+
+      <div class="mode-panel hidden" id="mode-files">
+        <p class="mode-hint">Drop multiple files, or an entire folder, of .xlsx/.xls/.csv reports with the same headers.</p>
+        <div class="dropzone" id="dropzone-files" tabindex="0">
+          <div class="dropzone-icon">🗂️</div>
+          <div class="dropzone-text">Drag &amp; drop files or a folder here<br/>or <span class="link-like">browse files</span> / <span class="link-like" id="browse-folder">browse a folder</span></div>
+          <input type="file" id="file-input-files" accept=".xlsx,.xls,.csv" multiple hidden />
+          <input type="file" id="folder-input-files" webkitdirectory multiple hidden />
+        </div>
+      </div>
+
+      <div class="status-line" id="status-line"></div>
+    </section>
+
+    <section class="panel sources-panel hidden" id="sources-panel">
+      <div class="panel-header">
+        <h2>Sources</h2>
+        <button class="ghost-btn" id="clear-all-btn">Clear all</button>
+      </div>
+      <p class="panel-sub">Uncheck anything you don't want included. Columns are combined automatically (union); any row missing a column is left blank there.</p>
+      <ul class="source-list" id="source-list"></ul>
+    </section>
+
+    <section class="panel results-panel hidden" id="results-panel">
+      <div class="panel-header">
+        <h2>Consolidated preview</h2>
+        <div class="summary-chips" id="summary-chips"></div>
+      </div>
+      <div class="table-scroll">
+        <table id="preview-table"></table>
+      </div>
+      <p class="preview-note" id="preview-note"></p>
+      <div class="export-row">
+        <input type="text" id="output-name" value="consolidated" />
+        <button class="primary-btn" id="export-xlsx-btn">Download .xlsx</button>
+        <button class="secondary-btn" id="export-csv-btn">Download .csv</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <p>Runs fully client-side — your files never leave this browser tab.</p>
+  </footer>
+
+  <script src="vendor/xlsx.full.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
