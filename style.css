@@ -78,38 +78,11 @@ body {
 
 .panel.hidden { display: none; }
 
-.mode-tabs {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
-}
-
-.mode-tab {
-  flex: 1;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  padding: 0.7rem 1rem;
-  border-radius: 10px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 500;
-  transition: all 0.15s ease;
-}
-
-.mode-tab.active {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
 .mode-hint {
   color: var(--text-dim);
   font-size: 0.85rem;
   margin: 0 0 0.9rem;
 }
-
-.mode-panel.hidden { display: none; }
 
 .dropzone {
   border: 2px dashed var(--border);
@@ -188,58 +161,192 @@ body {
 
 .ghost-btn:hover { color: var(--text); border-color: var(--text-dim); }
 
-.source-list {
+.file-group-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  max-height: 320px;
+  gap: 0.8rem;
+  max-height: 420px;
   overflow-y: auto;
 }
 
-.source-item {
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
+.file-group {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 0.6rem 0.9rem;
+  padding: 0.7rem 0.9rem;
 }
 
-.source-item input[type="checkbox"] {
+.file-group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-bottom: 0.4rem;
+}
+
+.file-group-name {
+  flex: 1;
+  font-size: 0.88rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheet-sublist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.sheet-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 8px;
+}
+
+.sheet-row:hover { background: rgba(255,255,255,0.03); }
+
+.sheet-row input[type="checkbox"] {
   width: 1.05rem;
   height: 1.05rem;
   accent-color: var(--accent);
   flex-shrink: 0;
 }
 
-.source-item .source-name {
+.sheet-row .sheet-label {
+  font-size: 0.85rem;
+  flex-shrink: 0;
+  min-width: 60px;
+}
+
+.sheet-row .header-preview {
+  font-size: 0.78rem;
+  color: var(--text-dim);
   flex: 1;
-  font-size: 0.88rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.source-item .source-meta {
+.source-meta {
   font-size: 0.78rem;
   color: var(--text-dim);
   flex-shrink: 0;
 }
 
-.source-item .remove-btn {
+.remove-btn {
   background: none;
   border: none;
   color: var(--text-dim);
   cursor: pointer;
   font-size: 0.9rem;
   padding: 0.2rem 0.4rem;
+  flex-shrink: 0;
 }
 
-.source-item .remove-btn:hover { color: var(--danger); }
+.remove-btn:hover { color: var(--danger); }
+
+.badge {
+  font-size: 0.72rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.badge-warn {
+  background: rgba(255, 184, 108, 0.15);
+  color: var(--warn);
+}
+
+.header-comparison {
+  font-size: 0.85rem;
+}
+
+.comparison-ok {
+  color: var(--good);
+  margin: 0 0 0.3rem;
+}
+
+.comparison-summary {
+  color: var(--text-dim);
+  margin: 0 0 0.5rem;
+}
+
+.diff-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.diff-list li {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.85rem;
+}
+
+.controls-row {
+  display: flex;
+  gap: 1.2rem;
+  margin-top: 1.1rem;
+  flex-wrap: wrap;
+}
+
+.strategy-fieldset, .source-cols-fieldset {
+  flex: 1;
+  min-width: 220px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.7rem 0.9rem;
+}
+
+.strategy-fieldset legend, .source-cols-fieldset legend {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  padding: 0 0.3rem;
+}
+
+.strategy-row, .checkbox-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  padding: 0.3rem 0;
+  cursor: pointer;
+}
+
+.strategy-row input, .checkbox-row input {
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+.checkbox-row code {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.8rem;
+}
+
+.single-sheet-note {
+  color: var(--warn);
+  font-size: 0.85rem;
+  margin: 0.3rem 0 0;
+}
+
+.single-sheet-note.hidden { display: none; }
 
 .summary-chips {
   display: flex;

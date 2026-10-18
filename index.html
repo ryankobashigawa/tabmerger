@@ -12,49 +12,64 @@
       <span class="brand-mark">⇄</span>
       <h1>TabMerger</h1>
     </div>
-    <p class="tagline">Consolidate same-header spreadsheets into one file — entirely in your browser. Nothing is uploaded anywhere.</p>
+    <p class="tagline">Combine every tab from every workbook into one sheet. Drop in one file or many. Everything runs in your browser, so nothing is uploaded.</p>
   </header>
 
   <main class="layout">
     <section class="panel input-panel">
-      <div class="mode-tabs" role="tablist">
-        <button class="mode-tab active" data-mode="workbook" role="tab" aria-selected="true">
-          One workbook, multiple tabs
-        </button>
-        <button class="mode-tab" data-mode="files" role="tab" aria-selected="false">
-          Multiple files / a folder
-        </button>
-      </div>
-
-      <div class="mode-panel" id="mode-workbook">
-        <p class="mode-hint">Drop a single .xlsx/.xls file. Every sheet inside it will be treated as a source to merge.</p>
-        <div class="dropzone" id="dropzone-workbook" tabindex="0">
-          <div class="dropzone-icon">📄</div>
-          <div class="dropzone-text">Drag &amp; drop a workbook here<br/>or <span class="link-like">browse</span></div>
-          <input type="file" id="file-input-workbook" accept=".xlsx,.xls" hidden />
+      <p class="mode-hint">Drop one workbook or several files — we'll combine every sheet into one.</p>
+      <div class="dropzone" id="dropzone" tabindex="0">
+        <div class="dropzone-icon">🗂️</div>
+        <div class="dropzone-text">
+          Drag &amp; drop files or a folder here<br/>
+          or <span class="link-like">browse files</span> / <span class="link-like" id="browse-folder">browse a folder</span>
         </div>
+        <input type="file" id="file-input" accept=".xlsx,.xls,.csv" multiple hidden />
+        <input type="file" id="folder-input" webkitdirectory multiple hidden />
       </div>
-
-      <div class="mode-panel hidden" id="mode-files">
-        <p class="mode-hint">Drop multiple files, or an entire folder, of .xlsx/.xls/.csv reports with the same headers.</p>
-        <div class="dropzone" id="dropzone-files" tabindex="0">
-          <div class="dropzone-icon">🗂️</div>
-          <div class="dropzone-text">Drag &amp; drop files or a folder here<br/>or <span class="link-like">browse files</span> / <span class="link-like" id="browse-folder">browse a folder</span></div>
-          <input type="file" id="file-input-files" accept=".xlsx,.xls,.csv" multiple hidden />
-          <input type="file" id="folder-input-files" webkitdirectory multiple hidden />
-        </div>
-      </div>
-
       <div class="status-line" id="status-line"></div>
     </section>
 
-    <section class="panel sources-panel hidden" id="sources-panel">
+    <section class="panel sheets-panel hidden" id="sheets-panel">
       <div class="panel-header">
-        <h2>Sources</h2>
+        <h2>Sheets detected</h2>
         <button class="ghost-btn" id="clear-all-btn">Clear all</button>
       </div>
-      <p class="panel-sub">Uncheck anything you don't want included. Columns are combined automatically (union); any row missing a column is left blank there.</p>
-      <ul class="source-list" id="source-list"></ul>
+      <p class="panel-sub">Uncheck anything you don't want included — e.g. an instructions or summary tab. Empty sheets and sheets with no header row are unchecked by default.</p>
+      <ul class="file-group-list" id="sheet-groups"></ul>
+    </section>
+
+    <section class="panel columns-panel hidden" id="columns-panel">
+      <div class="panel-header">
+        <h2>Columns</h2>
+      </div>
+      <div class="header-comparison" id="header-comparison"></div>
+
+      <div class="controls-row">
+        <fieldset class="strategy-fieldset">
+          <legend>When columns differ</legend>
+          <label class="strategy-row">
+            <input type="radio" name="strategy" value="union" id="strategy-union" checked />
+            Combine all columns <span class="source-meta">— missing values left blank (recommended)</span>
+          </label>
+          <label class="strategy-row">
+            <input type="radio" name="strategy" value="intersection" id="strategy-intersection" />
+            Only columns common to every selected sheet
+          </label>
+        </fieldset>
+
+        <fieldset class="source-cols-fieldset">
+          <legend>Traceability columns</legend>
+          <label class="checkbox-row">
+            <input type="checkbox" id="include-source-file" checked />
+            Add <code>source_file</code> column
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="include-source-sheet" checked />
+            Add <code>source_sheet</code> column
+          </label>
+        </fieldset>
+      </div>
     </section>
 
     <section class="panel results-panel hidden" id="results-panel">
@@ -62,6 +77,7 @@
         <h2>Consolidated preview</h2>
         <div class="summary-chips" id="summary-chips"></div>
       </div>
+      <p class="single-sheet-note hidden" id="single-sheet-note">Only one sheet is selected — there's nothing to consolidate yet, but you can still download it as-is.</p>
       <div class="table-scroll">
         <table id="preview-table"></table>
       </div>
@@ -79,6 +95,7 @@
   </footer>
 
   <script src="vendor/xlsx.full.min.js"></script>
+  <script src="core.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
