@@ -37,6 +37,9 @@
   try {
     const w = await loadFrame(1280);
     const d = w.document;
+    // Capture Umami events instead of sending them.
+    const events = [];
+    w.umami = { track: (name, data) => events.push({ name, data }) };
     const $ = (id) => d.getElementById(id);
     const visible = (id) => !$(id).classList.contains("hidden");
     const tableText = () => $("preview-table").textContent;
@@ -131,6 +134,14 @@
     ok("intersection drops Notes", headers().join("|") === "source_file|source_sheet|Region|Rep|Units|Revenue", headers().join("|"));
     $("strategy-union").click();
 
+    // --- Analytics events (no file names or contents) ---
+    const merges = events.filter((e) => e.name === "merge_completed");
+    ok("analytics: merge_completed once per load (picker, drop, 2x samples)", merges.length === 4, JSON.stringify(events));
+    events.length = 0;
+    $("strategy-intersection").click();
+    $("strategy-union").click();
+    ok("analytics: option changes don't fire merge_completed", events.length === 0, JSON.stringify(events));
+
     // --- Downloads ---
     let wbOut = null, wbName = null;
     const realWrite = w.XLSX.writeFile;
@@ -156,6 +167,10 @@
     ok("csv export: filename", dlName === "my_report.csv", dlName);
     ok("csv export: header + 18 rows", csvLines.length === 19 && csvLines[0] === "source_file,source_sheet,Region,Rep,Units,Revenue,Notes", csvLines.length + " " + csvLines[0]);
     ok("csv export: CSV notes carried through", csv.includes("Record month"));
+    const dl = events.filter((e) => e.name === "download_clicked").map((e) => e.data && e.data.format);
+    ok("analytics: download_clicked with format", JSON.stringify(dl) === '["xlsx","csv"]', JSON.stringify(events));
+    const sent = JSON.stringify(events);
+    ok("analytics: no file names or cell data sent", !/sales_|june|my_report|\.xlsx|\.csv|Avery|North/i.test(sent), sent);
 
     // --- Narrow viewport: no horizontal scroll, with results showing ---
     const m = await loadFrame(375);

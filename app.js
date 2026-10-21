@@ -27,6 +27,19 @@
   const previewNote = document.getElementById("preview-note");
   const outputNameInput = document.getElementById("output-name");
 
+  // ---------- Analytics ----------
+  // Umami custom events. Never pass file names, sheet names or cell data.
+  // No-ops when the Umami script is blocked or hasn't loaded yet.
+  function track(eventName, data) {
+    try {
+      if (window.umami && typeof window.umami.track === "function") {
+        window.umami.track(eventName, data);
+      }
+    } catch (err) {
+      // Analytics must never break the app.
+    }
+  }
+
   // ---------- Status helper ----------
   function setStatus(msg, kind) {
     statusLine.textContent = msg || "";
@@ -98,6 +111,12 @@
 
     renderSheetList();
     recompute();
+
+    // Count a merge once per batch of added files, not on every checkbox or
+    // option change (recompute runs on those too).
+    if (addedSheets && !resultsPanel.classList.contains("hidden")) {
+      track("merge_completed");
+    }
   }
 
   // ---------- Directory traversal (for dropped folders) ----------
@@ -517,6 +536,7 @@
     if (!last) return;
     const wb = TM.buildWorkbook(last.columns, last.rows, "Consolidated");
     XLSX.writeFile(wb, `${getOutputBaseName()}.xlsx`);
+    track("download_clicked", { format: "xlsx" });
   });
 
   document.getElementById("export-csv-btn").addEventListener("click", () => {
@@ -525,5 +545,6 @@
     const csv = TM.sheetToCsv(last.columns, last.rows);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     triggerDownload(blob, `${getOutputBaseName()}.csv`);
+    track("download_clicked", { format: "csv" });
   });
 })();
