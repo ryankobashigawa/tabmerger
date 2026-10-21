@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<!--
+  End-to-end check of the real page in a browser. Loads ../index.html in an
+  iframe and drives it the way a user would: file picker upload, drag & drop,
+  sample files, column strategy, and both downloads. Results are written into
+  #results as PASS/FAIL lines. Run via test/run-e2e.sh (headless Chrome).
+-->
+<html>
+<head><meta charset="utf-8"><title>e2e</title></head>
+<body>
+<pre id="results">RUNNING</pre>
+<script>
+(async function () {
+  const out = [];
+  const ok = (name, cond, detail) => out.push((cond ? "PASS - " : "FAIL - ") + name + (cond || !detail ? "" : " :: " + detail));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  async function until(fn, ms = 4000) {
+    const end = Date.now() + ms;
+    while (Date.now() < end) { try { if (fn()) return true; } catch (e) {} await sleep(25); }
+    return false;
+  }
+  function loadFrame(width) {
+    return new Promise((resolve) => {
+      const f = document.createElement("iframe");
+      f.style.width = width + "px";
+      f.style.height = "900px";
+      f.onload = () => resolve(f.contentWindow);
+      f.src = "../index.html";
+      document.body.appendChild(f);
+    });
+  }
+  async function fixtureFile(path) {
+    const res = await fetch("../test-fixtures/" + path);
+    return new File([await res.arrayBuffer()], path.split("/").pop());
+  }
+
+  try {
+    const w = await loadFrame(1280);
+    const d = w.document;
+    const $ = (id) => d.getElementById(id);
+    const visible = (id) => !$(id).classList.contains("hidden");
+    const tableText = () => $("preview-table").textContent;
+    const headers = () => Array.from(d.querySelectorAll("#preview-table th")).map((th) => th.textContent);
+    const chipNums = () => Array.from(d.querySelectorAll("#summary-chips strong")).map((s) => Number(s.textContent));
+
+    // --- Page basics ---
+    ok("scripts loaded from relative paths", typeof w.XLSX === "object" && typeof w.TM === "object");
+    ok("stylesheet applied (H1 is white)", w.getComputedStyle(d.querySelector("h1")).color === "rgb(255, 255, 255)");
+    ok("H1 copy", d.querySelector("h1").textContent.trim() === "Combine every tab from every workbook into one sheet.");
+    ok("exactly one h1", d.querySelectorAll("h1").length === 1);
+    ok("title", d.title === "StackMySheets – Combine Excel Tabs & Files Into One Sheet");
+    ok("no tabmerger references in page", !/tabmerger/i.test(d.documentElement.outerHTML));
+    ok("5 FAQ items", d.querySelectorAll(".faq details summary").length === 5);
+    ok("dropzone focusable", $("dropzone").tabIndex === 0);
+
+    // --- Picker wiring: count how often each hidden input gets opened ---
+    const fileInput = $("file-input"), folderInput = $("folder-input");
+    let filePicks = 0, folderPicks = 0;
+    fileInput.click = () => { filePicks++; };
+    folderInput.click = () => { folderPicks++; };
+    $("choose-files-btn").click();
+    ok("Choose files opens file picker once", filePicks === 1 && folderPicks === 0, `file=${filePicks} folder=${folderPicks}`);
+    filePicks = folderPicks = 0;
+    $("browse-folder").click();
+    ok("browse a folder opens folder picker only", filePicks === 0 && folderPicks === 1, `file=${filePicks} folder=${folderPicks}`);
+    filePicks = folderPicks = 0;
+    $("browse-folder").dispatchEvent(new w.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    ok("Enter on folder link doesn't open file picker", filePicks === 0);
+    $("dropzone").dispatchEvent(new w.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    ok("Enter on dropzone opens file picker", filePicks === 1);
+    filePicks = 0;
+    d.querySelector(".dropzone-text").click();
+    ok("click on dropzone background opens file picker", filePicks === 1);
+    delete fileInput.click; delete folderInput.click;
+
+    // --- Drag-over highlight ---
+    const dz = $("dropzone");
+    dz.dispatchEvent(new w.DragEvent("dragenter", { bubbles: true, cancelable: true }));
+    ok("dragover class on dragenter", dz.classList.contains("dragover"));
+    dz.dispatchEvent(new w.DragEvent("dragleave", { bubbles: true, relatedTarget: $("choose-files-btn") }));
+    ok("highlight kept when moving onto child", dz.classList.contains("dragover"));
+    dz.dispatchEvent(new w.DragEvent("dragleave", { bubbles: true, relatedTarget: d.body }));
+    ok("highlight removed when leaving zone", !dz.classList.contains("dragover"));
+
+    // --- Upload via file picker (real fixture files) ---
+    const monthFiles = await Promise.all(["multi_month_folder/april.xlsx", "multi_month_folder/may.xlsx", "multi_month_folder/june.csv"].map(fixtureFile));
+    const dt = new w.DataTransfer();
+    monthFiles.forEach((f) => dt.items.add(new w.File([f], f.name)));
+    fileInput.files = dt.files;
+    fileInput.dispatchEvent(new w.Event("change", { bubbles: true }));
+    await until(() => visible("results-panel"));
+    ok("picker upload: results shown", visible("results-panel"));
+    ok("picker upload: rows from all 3 files", ["Umbrella Corp", "Soylent Inc", "Stark Industries"].every((t) => tableText().includes(t)), tableText().slice(0, 200));
+    ok("picker upload: union keeps Notes column", headers().includes("Notes"), headers().join("|"));
+    ok("picker upload: 3 file groups listed", d.querySelectorAll(".file-group").length === 3);
+
+    // --- Clear all ---
+    $("clear-all-btn").click();
+    ok("clear all hides panels", !visible("sheets-panel") && !visible("results-panel"));
+
+    // --- Drag & drop (files fallback path) ---
+    const qr = await fixtureFile("quarterly_report.xlsx");
+    const drop = new w.Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, "dataTransfer", { value: { files: [new w.File([qr], qr.name)] } });
+    dz.dispatchEvent(drop);
+    await until(() => visible("results-panel"));
+    ok("drop upload: results shown", visible("results-panel"));
+    ok("drop upload: rows present", tableText().includes("Acme Co") && tableText().includes("Globex"));
+    $("clear-all-btn").click();
+
+    // --- Sample files ---
+    $("sample-btn").click();
+    await until(() => visible("results-panel") && d.querySelectorAll(".file-group").length === 3);
+    const groupNames = Array.from(d.querySelectorAll(".file-group-name")).map((e) => e.textContent);
+    ok("samples: 3 files", JSON.stringify(groupNames) === JSON.stringify(["sales_q1.xlsx", "sales_q2.xlsx", "june_sales.csv"]), groupNames.join("|"));
+    ok("samples: 6 sheets, 18 rows, 7 columns", JSON.stringify(chipNums()) === "[6,18,7]", JSON.stringify(chipNums()));
+    ok("samples: union columns", headers().join("|") === "source_file|source_sheet|Region|Rep|Units|Revenue|Notes", headers().join("|"));
+    const mayAvery = Array.from(d.querySelectorAll("#preview-table tbody tr"))
+      .map((tr) => Array.from(tr.children).map((td) => td.textContent))
+      .find((r) => r[1] === "May" && r[3] === "Avery");
+    ok("samples: reordered May columns matched by name", mayAvery && mayAvery[2] === "North" && mayAvery[4] === "45" && mayAvery[5] === "9000", JSON.stringify(mayAvery));
+    ok("samples: header comparison flags Notes", $("header-comparison").textContent.includes("Notes"));
+    $("sample-btn").click();
+    ok("samples: button disabled while loading", $("sample-btn").disabled);
+    $("sample-btn").click(); // ignored while disabled
+    await until(() => !$("sample-btn").disabled && JSON.stringify(chipNums()) === "[6,18,7]");
+    const groupNames2 = Array.from(d.querySelectorAll(".file-group-name")).map((e) => e.textContent);
+    ok("samples twice: replaced, not duplicated", JSON.stringify(groupNames2) === JSON.stringify(groupNames) && JSON.stringify(chipNums()) === "[6,18,7]", groupNames2.join("|") + " " + JSON.stringify(chipNums()));
+
+    $("strategy-intersection").click();
+    ok("intersection drops Notes", headers().join("|") === "source_file|source_sheet|Region|Rep|Units|Revenue", headers().join("|"));
+    $("strategy-union").click();
+
+    // --- Downloads ---
+    let wbOut = null, wbName = null;
+    const realWrite = w.XLSX.writeFile;
+    w.XLSX.writeFile = (wb, name) => { wbOut = wb; wbName = name; };
+    $("output-name").value = "my_report.xlsx";
+    $("export-xlsx-btn").click();
+    w.XLSX.writeFile = realWrite;
+    const aoa = wbOut && w.XLSX.utils.sheet_to_json(wbOut.Sheets[wbOut.SheetNames[0]], { header: 1 });
+    ok("xlsx export: filename", wbName === "my_report.xlsx", wbName);
+    ok("xlsx export: header + 18 rows", aoa && aoa.length === 19 && aoa[0].join("|") === "source_file|source_sheet|Region|Rep|Units|Revenue|Notes", aoa && aoa.length);
+
+    let blobOut = null;
+    const realCreate = w.URL.createObjectURL;
+    w.URL.createObjectURL = (b) => { blobOut = b; return "about:blank"; };
+    const realAnchorClick = w.HTMLAnchorElement.prototype.click;
+    let dlName = null;
+    w.HTMLAnchorElement.prototype.click = function () { dlName = this.download; };
+    $("export-csv-btn").click();
+    w.URL.createObjectURL = realCreate;
+    w.HTMLAnchorElement.prototype.click = realAnchorClick;
+    const csv = blobOut ? await blobOut.text() : "";
+    const csvLines = csv.trim().split("\n");
+    ok("csv export: filename", dlName === "my_report.csv", dlName);
+    ok("csv export: header + 18 rows", csvLines.length === 19 && csvLines[0] === "source_file,source_sheet,Region,Rep,Units,Revenue,Notes", csvLines.length + " " + csvLines[0]);
+    ok("csv export: CSV notes carried through", csv.includes("Record month"));
+
+    // --- Narrow viewport: no horizontal scroll, with results showing ---
+    const m = await loadFrame(375);
+    m.document.getElementById("sample-btn").click();
+    await until(() => !m.document.getElementById("results-panel").classList.contains("hidden"));
+    await sleep(200);
+    const de = m.document.documentElement;
+    ok("375px: no horizontal scroll (with results)", de.scrollWidth <= de.clientWidth, `scrollWidth=${de.scrollWidth} clientWidth=${de.clientWidth}`);
+    const stepsCols = m.getComputedStyle(m.document.querySelector(".steps")).gridTemplateColumns.split(" ").length;
+    ok("375px: steps stacked", stepsCols === 1, String(stepsCols));
+  } catch (err) {
+    ok("harness error", false, err && (err.stack || err.message || err));
+  }
+
+  const fails = out.filter((l) => l.startsWith("FAIL")).length;
+  out.push(`\n${out.length - fails} passed, ${fails} failed`);
+  document.getElementById("results").textContent = out.join("\n");
+  document.title = "DONE";
+})();
+</script>
+</body>
+</html>

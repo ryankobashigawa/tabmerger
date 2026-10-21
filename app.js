@@ -150,16 +150,15 @@
   }
 
   // ---------- Dropzone wiring ----------
-  function wireDropzone(zoneEl, onFiles) {
-    zoneEl.addEventListener("click", () => {
-      const input = zoneEl.querySelector('input[type="file"]:not(#folder-input)');
-      if (input) input.click();
-    });
+  function wireDropzone(zoneEl, fileInputEl, onFiles) {
+    // Clicking anywhere in the zone opens the picker; the buttons inside
+    // handle their own clicks and stop propagation so it only opens once.
+    zoneEl.addEventListener("click", () => fileInputEl.click());
     zoneEl.addEventListener("keydown", (e) => {
+      if (e.target !== zoneEl) return; // let inner buttons handle their own keys
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        const input = zoneEl.querySelector('input[type="file"]:not(#folder-input)');
-        if (input) input.click();
+        fileInputEl.click();
       }
     });
     ["dragenter", "dragover"].forEach((evt) =>
@@ -168,9 +167,11 @@
         zoneEl.classList.add("dragover");
       })
     );
-    ["dragleave", "dragend"].forEach((evt) =>
-      zoneEl.addEventListener(evt, () => zoneEl.classList.remove("dragover"))
-    );
+    zoneEl.addEventListener("dragleave", (e) => {
+      // dragleave also fires when moving onto a child element; ignore those.
+      if (!zoneEl.contains(e.relatedTarget)) zoneEl.classList.remove("dragover");
+    });
+    zoneEl.addEventListener("dragend", () => zoneEl.classList.remove("dragover"));
     zoneEl.addEventListener("drop", async (e) => {
       e.preventDefault();
       zoneEl.classList.remove("dragover");
@@ -182,7 +183,7 @@
   const dropzone = document.getElementById("dropzone");
   const fileInput = document.getElementById("file-input");
   const folderInput = document.getElementById("folder-input");
-  wireDropzone(dropzone, ingestFiles);
+  wireDropzone(dropzone, fileInput, ingestFiles);
   fileInput.addEventListener("change", (e) => {
     if (e.target.files.length) ingestFiles(e.target.files);
     e.target.value = "";
@@ -191,9 +192,68 @@
     if (e.target.files.length) ingestFiles(e.target.files);
     e.target.value = "";
   });
+  // Hidden inputs sit inside the zone, so their synthetic clicks would bubble
+  // back up to the zone's click handler and reopen the picker.
+  [fileInput, folderInput].forEach((input) =>
+    input.addEventListener("click", (e) => e.stopPropagation())
+  );
+  document.getElementById("choose-files-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    fileInput.click();
+  });
   document.getElementById("browse-folder").addEventListener("click", (e) => {
     e.stopPropagation();
     folderInput.click();
+  });
+
+  // ---------- Sample files ----------
+  // Built in code with the bundled SheetJS so the demo needs no extra assets.
+  // Includes a tab with a different column order (May) and a CSV with an
+  // extra column (Notes) so the column handling is visible in the demo.
+  function sampleWorkbookFile(fileName, tabs) {
+    const wb = XLSX.utils.book_new();
+    tabs.forEach(([tabName, aoa]) => {
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), tabName);
+    });
+    const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+    return new File([buf], fileName, {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+  }
+
+  function buildSampleFiles() {
+    const header = ["Region", "Rep", "Units", "Revenue"];
+    const q1 = sampleWorkbookFile("sales_q1.xlsx", [
+      ["January", [header, ["North", "Avery", 42, 8400], ["South", "Jordan", 35, 7000], ["West", "Riley", 28, 5600]]],
+      ["February", [header, ["North", "Avery", 38, 7600], ["South", "Jordan", 41, 8200], ["West", "Riley", 31, 6200]]],
+      ["March", [header, ["North", "Avery", 47, 9400], ["South", "Jordan", 39, 7800], ["West", "Riley", 36, 7200]]],
+    ]);
+    const q2 = sampleWorkbookFile("sales_q2.xlsx", [
+      ["April", [header, ["North", "Avery", 44, 8800], ["South", "Jordan", 37, 7400], ["West", "Riley", 33, 6600]]],
+      // Same columns, different order: matched by name, not position.
+      ["May", [["Revenue", "Region", "Units", "Rep"], [9000, "North", 45, "Avery"], [8000, "South", 40, "Jordan"], [7000, "West", 35, "Riley"]]],
+    ]);
+    const juneCsv = [
+      "Region,Rep,Units,Revenue,Notes",
+      "North,Avery,50,10000,Record month",
+      "South,Jordan,43,8600,",
+      "West,Riley,38,7600,New client signed",
+    ].join("\n");
+    const june = new File([juneCsv], "june_sales.csv", { type: "text/csv" });
+    return [q1, q2, june];
+  }
+
+  const sampleBtn = document.getElementById("sample-btn");
+  sampleBtn.addEventListener("click", async () => {
+    // Disabled while loading so a double-click can't interleave two loads.
+    sampleBtn.disabled = true;
+    try {
+      resetSources();
+      await ingestFiles(buildSampleFiles());
+      sheetsPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    } finally {
+      sampleBtn.disabled = false;
+    }
   });
 
   // ---------- Sheet list rendering (grouped by source file) ----------
@@ -297,10 +357,15 @@
     });
   }
 
-  document.getElementById("clear-all-btn").addEventListener("click", () => {
+  function resetSources() {
     sheets = [];
+    Object.keys(fileNameCounts).forEach((name) => delete fileNameCounts[name]);
     renderSheetList();
     recompute();
+  }
+
+  document.getElementById("clear-all-btn").addEventListener("click", () => {
+    resetSources();
     setStatus("Cleared all sources.");
   });
 
