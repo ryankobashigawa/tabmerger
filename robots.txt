@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /test/
+Disallow: /test-fixtures/
+
+Sitemap: https://stackmysheets.com/sitemap.xml
