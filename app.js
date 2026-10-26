@@ -1,21 +1,22 @@
+// Stack page (/): stack every selected sheet into one sheet.
 (() => {
   "use strict";
 
   const PREVIEW_LIMIT = 200;
-  const HEADER_PREVIEW_LIMIT = 8;
   const DIFF_SHEETS_SHOWN = 3;
 
   /** @type {Array<Object>} each item is a core.js Sheet plus {id, included} */
   let sheets = [];
   let sheetSeq = 0;
   const fileNameCounts = {};
+  // The original File objects, kept so they can be handed to Merge into tabs.
+  let loadedFiles = []; // [{file, fileLabel}]
 
   let strategy = "union"; // 'union' | 'intersection'
   let includeSourceFile = true;
   let includeSourceSheet = true;
 
   // ---------- DOM refs ----------
-  const statusLine = document.getElementById("status-line");
   const sheetsPanel = document.getElementById("sheets-panel");
   const sheetGroups = document.getElementById("sheet-groups");
   const columnsPanel = document.getElementById("columns-panel");
@@ -26,241 +27,50 @@
   const previewTable = document.getElementById("preview-table");
   const previewNote = document.getElementById("preview-note");
   const outputNameInput = document.getElementById("output-name");
+  const switchNote = document.getElementById("switch-note");
+  const setStatus = SMS.statusSetter(document.getElementById("status-line"));
 
-  // ---------- Analytics ----------
-  // Umami custom events. Never pass file names, sheet names or cell data.
-  // No-ops when the Umami script is blocked or hasn't loaded yet.
-  function track(eventName, data) {
-    try {
-      if (window.umami && typeof window.umami.track === "function") {
-        window.umami.track(eventName, data);
-      }
-    } catch (err) {
-      // Analytics must never break the app.
-    }
-  }
-
-  // ---------- Status helper ----------
-  function setStatus(msg, kind) {
-    statusLine.textContent = msg || "";
-    statusLine.classList.remove("error", "good");
-    if (kind) statusLine.classList.add(kind);
-  }
-
-  // ---------- File reading (browser-only glue; pure logic lives in core.js) ----------
-  function readFileAsArrayBuffer(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(reader.error);
-      reader.readAsArrayBuffer(file);
-    });
-  }
-
-  function readFileAsText(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(reader.error);
-      reader.readAsText(file);
-    });
-  }
-
+  // ---------- Loading ----------
   async function ingestFiles(fileList) {
     const files = Array.from(fileList);
-    const accepted = files.filter((f) => TM.hasAcceptedExtension(f.name));
-    const rejected = files.filter((f) => !TM.hasAcceptedExtension(f.name));
-
-    if (accepted.length === 0) {
-      const suffix = rejected.length ? ` Skipped: ${rejected.map((f) => f.name).join(", ")}.` : "";
-      setStatus(`No .xlsx/.xls/.csv files found in that selection.${suffix}`, "error");
-      return;
-    }
-
-    setStatus(`Reading ${accepted.length} file${accepted.length > 1 ? "s" : ""}…`);
-    let addedSheets = 0;
-    const errors = [];
-
-    for (const file of accepted) {
-      try {
-        fileNameCounts[file.name] = (fileNameCounts[file.name] || 0) + 1;
-        const fileLabel = TM.buildSourceLabel(file.name, fileNameCounts[file.name]);
-        const isCsv = file.name.toLowerCase().endsWith(".csv");
-        const source = isCsv ? await readFileAsText(file) : await readFileAsArrayBuffer(file);
-        const parsed = TM.parseSheetsFromSource(source, { isCsv, fileName: file.name, fileLabel });
-        parsed.forEach((sheet) => {
-          sheet.id = `sheet-${++sheetSeq}`;
-          sheet.included = !sheet.isEmpty && sheet.hasHeaderRow;
-          sheets.push(sheet);
-          addedSheets += 1;
-        });
-      } catch (err) {
-        errors.push(`Couldn't read "${file.name}": ${err.message || err}`);
-      }
-    }
-
-    const parts = [];
-    if (addedSheets) {
-      parts.push(`Loaded ${addedSheets} sheet${addedSheets !== 1 ? "s" : ""} from ${accepted.length} file${accepted.length !== 1 ? "s" : ""}.`);
-    }
-    if (rejected.length) {
-      parts.push(`Skipped unsupported file${rejected.length !== 1 ? "s" : ""}: ${rejected.map((f) => f.name).join(", ")}.`);
-    }
-    if (errors.length) parts.push(errors.join(" "));
-    setStatus(parts.join(" "), errors.length ? "error" : "good");
+    if (!files.length) return;
+    setStatus(`Reading ${SMS.plural(files.length, "file")}…`);
+    const result = await SMS.loadFiles(files, { fileNameCounts });
+    result.sheets.forEach((sheet) => {
+      sheet.id = `sheet-${++sheetSeq}`;
+      sheet.included = !sheet.isEmpty && sheet.hasHeaderRow;
+      sheets.push(sheet);
+    });
+    loadedFiles = loadedFiles.concat(result.loaded);
+    const summary = SMS.loadSummary(result);
+    setStatus(summary.message, summary.kind);
 
     renderSheetList();
     recompute();
 
     // Count a merge once per batch of added files, not on every checkbox or
     // option change (recompute runs on those too).
-    if (addedSheets && !resultsPanel.classList.contains("hidden")) {
-      track("merge_completed");
+    if (result.sheets.length && !resultsPanel.classList.contains("hidden")) {
+      SMS.track("merge_completed");
     }
   }
 
-  // ---------- Directory traversal (for dropped folders) ----------
-  function readAllDirectoryEntries(directoryReader) {
-    return new Promise((resolve, reject) => {
-      const entries = [];
-      function readBatch() {
-        directoryReader.readEntries((batch) => {
-          if (!batch.length) {
-            resolve(entries);
-          } else {
-            entries.push(...batch);
-            readBatch();
-          }
-        }, reject);
-      }
-      readBatch();
-    });
+  function resetSources() {
+    sheets = [];
+    loadedFiles = [];
+    Object.keys(fileNameCounts).forEach((name) => delete fileNameCounts[name]);
+    renderSheetList();
+    recompute();
   }
 
-  async function collectFilesFromEntry(entry, out) {
-    if (entry.isFile) {
-      await new Promise((resolve) => {
-        entry.file((file) => {
-          if (TM.hasAcceptedExtension(file.name)) out.push(file);
-          resolve();
-        }, () => resolve());
-      });
-    } else if (entry.isDirectory) {
-      const entries = await readAllDirectoryEntries(entry.createReader());
-      for (const child of entries) {
-        await collectFilesFromEntry(child, out);
-      }
-    }
-  }
-
-  async function filesFromDataTransfer(dataTransfer) {
-    const items = dataTransfer.items;
-    const out = [];
-    if (items && items.length && items[0].webkitGetAsEntry) {
-      const entries = Array.from(items)
-        .map((item) => (item.webkitGetAsEntry ? item.webkitGetAsEntry() : null))
-        .filter(Boolean);
-      for (const entry of entries) {
-        await collectFilesFromEntry(entry, out);
-      }
-      return out;
-    }
-    return Array.from(dataTransfer.files || []);
-  }
-
-  // ---------- Dropzone wiring ----------
-  function wireDropzone(zoneEl, fileInputEl, onFiles) {
-    // Clicking anywhere in the zone opens the picker; the buttons inside
-    // handle their own clicks and stop propagation so it only opens once.
-    zoneEl.addEventListener("click", () => fileInputEl.click());
-    zoneEl.addEventListener("keydown", (e) => {
-      if (e.target !== zoneEl) return; // let inner buttons handle their own keys
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        fileInputEl.click();
-      }
-    });
-    ["dragenter", "dragover"].forEach((evt) =>
-      zoneEl.addEventListener(evt, (e) => {
-        e.preventDefault();
-        zoneEl.classList.add("dragover");
-      })
-    );
-    zoneEl.addEventListener("dragleave", (e) => {
-      // dragleave also fires when moving onto a child element; ignore those.
-      if (!zoneEl.contains(e.relatedTarget)) zoneEl.classList.remove("dragover");
-    });
-    zoneEl.addEventListener("dragend", () => zoneEl.classList.remove("dragover"));
-    zoneEl.addEventListener("drop", async (e) => {
-      e.preventDefault();
-      zoneEl.classList.remove("dragover");
-      const files = await filesFromDataTransfer(e.dataTransfer);
-      onFiles(files);
-    });
-  }
-
-  const dropzone = document.getElementById("dropzone");
-  const fileInput = document.getElementById("file-input");
-  const folderInput = document.getElementById("folder-input");
-  wireDropzone(dropzone, fileInput, ingestFiles);
-  fileInput.addEventListener("change", (e) => {
-    if (e.target.files.length) ingestFiles(e.target.files);
-    e.target.value = "";
+  SMS.wireDropzone({
+    dropzone: document.getElementById("dropzone"),
+    fileInput: document.getElementById("file-input"),
+    folderInput: document.getElementById("folder-input"),
+    chooseButton: document.getElementById("choose-files-btn"),
+    folderButton: document.getElementById("browse-folder"),
+    onFiles: ingestFiles,
   });
-  folderInput.addEventListener("change", (e) => {
-    if (e.target.files.length) ingestFiles(e.target.files);
-    e.target.value = "";
-  });
-  // Hidden inputs sit inside the zone, so their synthetic clicks would bubble
-  // back up to the zone's click handler and reopen the picker.
-  [fileInput, folderInput].forEach((input) =>
-    input.addEventListener("click", (e) => e.stopPropagation())
-  );
-  document.getElementById("choose-files-btn").addEventListener("click", (e) => {
-    e.stopPropagation();
-    fileInput.click();
-  });
-  document.getElementById("browse-folder").addEventListener("click", (e) => {
-    e.stopPropagation();
-    folderInput.click();
-  });
-
-  // ---------- Sample files ----------
-  // Built in code with the bundled SheetJS so the demo needs no extra assets.
-  // Includes a tab with a different column order (May) and a CSV with an
-  // extra column (Notes) so the column handling is visible in the demo.
-  function sampleWorkbookFile(fileName, tabs) {
-    const wb = XLSX.utils.book_new();
-    tabs.forEach(([tabName, aoa]) => {
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), tabName);
-    });
-    const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" });
-    return new File([buf], fileName, {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
-  }
-
-  function buildSampleFiles() {
-    const header = ["Region", "Rep", "Units", "Revenue"];
-    const q1 = sampleWorkbookFile("sales_q1.xlsx", [
-      ["January", [header, ["North", "Avery", 42, 8400], ["South", "Jordan", 35, 7000], ["West", "Riley", 28, 5600]]],
-      ["February", [header, ["North", "Avery", 38, 7600], ["South", "Jordan", 41, 8200], ["West", "Riley", 31, 6200]]],
-      ["March", [header, ["North", "Avery", 47, 9400], ["South", "Jordan", 39, 7800], ["West", "Riley", 36, 7200]]],
-    ]);
-    const q2 = sampleWorkbookFile("sales_q2.xlsx", [
-      ["April", [header, ["North", "Avery", 44, 8800], ["South", "Jordan", 37, 7400], ["West", "Riley", 33, 6600]]],
-      // Same columns, different order: matched by name, not position.
-      ["May", [["Revenue", "Region", "Units", "Rep"], [9000, "North", 45, "Avery"], [8000, "South", 40, "Jordan"], [7000, "West", 35, "Riley"]]],
-    ]);
-    const juneCsv = [
-      "Region,Rep,Units,Revenue,Notes",
-      "North,Avery,50,10000,Record month",
-      "South,Jordan,43,8600,",
-      "West,Riley,38,7600,New client signed",
-    ].join("\n");
-    const june = new File([juneCsv], "june_sales.csv", { type: "text/csv" });
-    return [q1, q2, june];
-  }
 
   const sampleBtn = document.getElementById("sample-btn");
   sampleBtn.addEventListener("click", async () => {
@@ -268,119 +78,47 @@
     sampleBtn.disabled = true;
     try {
       resetSources();
-      await ingestFiles(buildSampleFiles());
+      await ingestFiles(SMS.salesSampleFiles());
       sheetsPanel.scrollIntoView({ behavior: "smooth", block: "start" });
     } finally {
       sampleBtn.disabled = false;
     }
   });
 
-  // ---------- Sheet list rendering (grouped by source file) ----------
-  function truncatedHeaderPreview(headers) {
-    if (headers.length === 0) return "—";
-    const shown = headers.slice(0, HEADER_PREVIEW_LIMIT).join(", ");
-    const extra = headers.length - HEADER_PREVIEW_LIMIT;
-    return extra > 0 ? `${shown}, +${extra} more` : shown;
-  }
+  // ---------- Hand-off to Merge into tabs ----------
+  // Saves the loaded files in this browser (IndexedDB) so the merge page can
+  // pick them up. If that fails, the link still works; files just aren't carried.
+  document.getElementById("switch-to-merge").addEventListener("click", async (e) => {
+    if (!loadedFiles.length) return;
+    e.preventDefault();
+    const href = e.currentTarget.href;
+    try {
+      // Never let a slow or stuck IndexedDB hold up the link.
+      await Promise.race([
+        SMS.saveHandoff(loadedFiles.map((f) => f.file)),
+        new Promise((resolve) => setTimeout(resolve, 2000)),
+      ]);
+    } catch (err) {
+      // fall through to plain navigation
+    }
+    window.location.href = href;
+  });
 
+  // ---------- Sheet list ----------
   function renderSheetList() {
     sheetsPanel.classList.toggle("hidden", sheets.length === 0);
     columnsPanel.classList.toggle("hidden", sheets.length === 0);
-    sheetGroups.innerHTML = "";
-
-    const groups = [];
-    const groupByLabel = new Map();
-    sheets.forEach((sheet) => {
-      if (!groupByLabel.has(sheet.fileLabel)) {
-        const g = { fileLabel: sheet.fileLabel, items: [] };
-        groupByLabel.set(sheet.fileLabel, g);
-        groups.push(g);
-      }
-      groupByLabel.get(sheet.fileLabel).items.push(sheet);
-    });
-
-    groups.forEach((group) => {
-      const wrapper = document.createElement("li");
-      wrapper.className = "file-group";
-
-      const header = document.createElement("div");
-      header.className = "file-group-header";
-
-      const nameEl = document.createElement("span");
-      nameEl.className = "file-group-name";
-      nameEl.textContent = group.fileLabel;
-
-      const metaEl = document.createElement("span");
-      metaEl.className = "source-meta";
-      metaEl.textContent = `${group.items.length} sheet${group.items.length !== 1 ? "s" : ""}`;
-
-      const removeBtn = document.createElement("button");
-      removeBtn.className = "remove-btn";
-      removeBtn.textContent = "✕";
-      removeBtn.title = "Remove this file";
-      removeBtn.addEventListener("click", () => {
-        sheets = sheets.filter((s) => s.fileLabel !== group.fileLabel);
+    switchNote.hidden = sheets.length === 0;
+    SMS.renderSheetChecklist(sheetGroups, sheets, {
+      mode: "stack",
+      onToggle: () => recompute(),
+      onRemoveFile: (fileLabel) => {
+        sheets = sheets.filter((s) => s.fileLabel !== fileLabel);
+        loadedFiles = loadedFiles.filter((f) => f.fileLabel !== fileLabel);
         renderSheetList();
         recompute();
-      });
-
-      header.append(nameEl, metaEl, removeBtn);
-      wrapper.appendChild(header);
-
-      const list = document.createElement("ul");
-      list.className = "sheet-sublist";
-
-      group.items.forEach((sheet) => {
-        const li = document.createElement("li");
-        li.className = "sheet-row";
-
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.checked = sheet.included;
-        checkbox.addEventListener("change", () => {
-          sheet.included = checkbox.checked;
-          recompute();
-        });
-
-        const label = document.createElement("span");
-        label.className = "sheet-label";
-        const nameText = sheet.sheetName || "(CSV)";
-        label.textContent = nameText;
-
-        const badge = document.createElement("span");
-        if (sheet.isEmpty) {
-          badge.className = "badge badge-warn";
-          badge.textContent = "empty";
-        } else if (!sheet.hasHeaderRow) {
-          badge.className = "badge badge-warn";
-          badge.textContent = "no header row";
-        }
-
-        const meta = document.createElement("span");
-        meta.className = "source-meta";
-        meta.textContent = `${sheet.rows.length} row${sheet.rows.length !== 1 ? "s" : ""} · ${sheet.headers.length} col${sheet.headers.length !== 1 ? "s" : ""}`;
-
-        const headerPreview = document.createElement("span");
-        headerPreview.className = "header-preview";
-        headerPreview.textContent = truncatedHeaderPreview(sheet.headers);
-        headerPreview.title = sheet.headers.join(", ");
-
-        li.append(checkbox, label);
-        if (badge.textContent) li.appendChild(badge);
-        li.append(meta, headerPreview);
-        list.appendChild(li);
-      });
-
-      wrapper.appendChild(list);
-      sheetGroups.appendChild(wrapper);
+      },
     });
-  }
-
-  function resetSources() {
-    sheets = [];
-    Object.keys(fileNameCounts).forEach((name) => delete fileNameCounts[name]);
-    renderSheetList();
-    recompute();
   }
 
   document.getElementById("clear-all-btn").addEventListener("click", () => {
@@ -434,7 +172,12 @@
       const shown = entry.sheets.slice(0, DIFF_SHEETS_SHOWN).join(", ");
       const extra = entry.sheets.length - DIFF_SHEETS_SHOWN;
       const sheetsText = extra > 0 ? `${shown}, +${extra} more` : shown;
-      li.innerHTML = `<strong>${entry.label}</strong> <span class="source-meta">— in: ${sheetsText}</span>`;
+      const strong = document.createElement("strong");
+      strong.textContent = entry.label;
+      const where = document.createElement("span");
+      where.className = "source-meta";
+      where.textContent = ` — in: ${sheetsText}`;
+      li.append(strong, " ", where);
       list.appendChild(li);
     });
     headerComparisonEl.appendChild(list);
@@ -515,20 +258,8 @@
   }
 
   // ---------- Export ----------
-  function triggerDownload(blob, filename) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-
   function getOutputBaseName() {
-    const raw = (outputNameInput.value || "consolidated").trim();
-    return raw.replace(/\.(xlsx|csv)$/i, "") || "consolidated";
+    return SMS.cleanOutputName(outputNameInput.value, "consolidated");
   }
 
   document.getElementById("export-xlsx-btn").addEventListener("click", () => {
@@ -536,15 +267,14 @@
     if (!last) return;
     const wb = TM.buildWorkbook(last.columns, last.rows, "Consolidated");
     XLSX.writeFile(wb, `${getOutputBaseName()}.xlsx`);
-    track("download_clicked", { format: "xlsx" });
+    SMS.track("download_clicked", { tool: "stack", format: "xlsx" });
   });
 
   document.getElementById("export-csv-btn").addEventListener("click", () => {
     const last = recompute._last;
     if (!last) return;
     const csv = TM.sheetToCsv(last.columns, last.rows);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    triggerDownload(blob, `${getOutputBaseName()}.csv`);
-    track("download_clicked", { format: "csv" });
+    SMS.downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8;" }), `${getOutputBaseName()}.csv`);
+    SMS.track("download_clicked", { tool: "stack", format: "csv" });
   });
 })();

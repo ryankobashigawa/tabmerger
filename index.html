@@ -34,6 +34,11 @@
       </span>
       <span class="brand-name">StackMySheets</span>
     </a>
+    <nav class="tool-nav" aria-label="Tools">
+      <a href="./" aria-current="page">Stack sheets</a>
+      <a href="merge-into-tabs">Merge into tabs</a>
+      <a href="split">Split workbook</a>
+    </nav>
   </header>
 
   <section class="hero">
@@ -67,6 +72,7 @@
         <button type="button" class="secondary-btn" id="sample-btn">Try with sample files</button>
       </div>
       <div class="status-line" id="status-line" role="status" aria-live="polite"></div>
+      <p class="switch-note" id="switch-note" hidden>Want each file as its own tab instead? <a href="merge-into-tabs" id="switch-to-merge">Switch to Merge into tabs →</a></p>
     </section>
 
     <section class="panel sheets-panel hidden" id="sheets-panel">
@@ -190,11 +196,17 @@
   </div>
 
   <footer class="site-footer">
-    <p>StackMySheets · Free to use, no sign-up</p>
+    <nav class="footer-nav" aria-label="All tools">
+      <a href="./">Stack sheets</a>
+      <a href="merge-into-tabs">Merge into tabs</a>
+      <a href="split">Split workbook</a>
+    </nav>
+    <p>Combine, merge and split spreadsheets in your browser. Free, no sign-up, nothing uploaded.</p>
   </footer>
 
   <script src="vendor/xlsx.full.min.js"></script>
   <script src="core.js"></script>
+  <script src="ui.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -17,7 +17,9 @@ TODAY="$(date +%Y-%m-%d)"
         case "$file" in
           index.html) path="/" ;;
           */index.html) path="/${file%index.html}" ;;
-          *) path="/$file" ;;
+          # GitHub Pages serves foo.html at /foo; list the extensionless URL
+          # so it matches each page's canonical link.
+          *) path="/${file%.html}" ;;
         esac
         if [ -n "$(git status --porcelain -- "$file")" ]; then
           lastmod="$TODAY"

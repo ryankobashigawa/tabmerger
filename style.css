@@ -48,6 +48,35 @@ body {
   max-width: 920px;
   margin: 0 auto;
   padding: 1.25rem 1.5rem 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+}
+
+.tool-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.tool-nav a {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 0.88rem;
+  font-weight: 500;
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.tool-nav a:hover { color: var(--text); }
+
+.tool-nav a[aria-current="page"] {
+  color: #fff;
+  background: var(--accent-soft);
+  border-color: rgba(108, 140, 255, 0.45);
 }
 
 .brand {
@@ -306,6 +335,14 @@ body {
   flex-shrink: 0;
 }
 
+.sheet-check {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 .sheet-row .sheet-label {
   font-size: 0.85rem;
   flex-shrink: 0;
@@ -433,6 +470,135 @@ body {
 }
 
 .single-sheet-note.hidden { display: none; }
+
+.switch-note {
+  margin: 0.9rem 0 0;
+  font-size: 0.88rem;
+  color: var(--text-dim);
+}
+
+.switch-note a, .faq-body a {
+  color: var(--accent);
+  text-underline-offset: 2px;
+}
+
+.switch-note a:hover, .faq-body a:hover { color: var(--accent-strong-text); }
+
+.panel-sub code {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+.empty-note {
+  color: var(--warn);
+  font-size: 0.85rem;
+  margin: 0.6rem 0 0;
+}
+
+.empty-note.hidden { display: none; }
+
+/* ---------- Merge into tabs: tab order ---------- */
+.tab-order {
+  list-style: none;
+  margin: 0.9rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.tab-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.5rem 0.6rem 0.5rem 0.8rem;
+}
+
+.tab-num {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  min-width: 1.4rem;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.tab-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.tab-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.tab-text .source-meta { overflow-wrap: anywhere; flex-shrink: 1; }
+
+.tab-controls {
+  display: flex;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
+.icon-btn {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.icon-btn:hover:not(:disabled) { border-color: var(--text-dim); }
+.icon-btn:disabled { opacity: 0.35; cursor: default; }
+
+/* ---------- Split: output ---------- */
+.format-fieldset {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.7rem 0.9rem;
+  margin: 0.9rem 0 0;
+}
+
+.format-fieldset legend {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  padding: 0 0.3rem;
+}
+
+.file-name-list {
+  list-style: none;
+  margin: 0.9rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.file-name-list li {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.85rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+}
 
 .summary-chips {
   display: flex;
@@ -670,12 +836,30 @@ table tr:hover td { background: rgba(255,255,255,0.02); }
 
 .site-footer p { margin: 0; }
 
+.footer-nav {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.25rem;
+  margin-bottom: 0.8rem;
+}
+
+.footer-nav a {
+  color: var(--text-dim);
+  text-underline-offset: 2px;
+}
+
+.footer-nav a:hover { color: var(--text); }
+
 /* ---------- Small screens ---------- */
 @media (max-width: 680px) {
   .steps { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 480px) {
+  .site-header { flex-direction: column; align-items: flex-start; }
+  .tool-nav { width: 100%; gap: 0; justify-content: space-between; }
+  .tool-nav a { padding: 0.4rem 0.55rem; font-size: 0.8rem; white-space: nowrap; }
   .site-header, .layout, .content { padding-left: 1rem; padding-right: 1rem; }
   .hero { padding: 2rem 1rem 1.5rem; }
   .panel { padding: 1rem; }

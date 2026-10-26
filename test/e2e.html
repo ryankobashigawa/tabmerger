@@ -12,22 +12,29 @@
 <script>
 (async function () {
   const out = [];
-  const ok = (name, cond, detail) => out.push((cond ? "PASS - " : "FAIL - ") + name + (cond || !detail ? "" : " :: " + detail));
+  const resultsEl = document.getElementById("results");
+  const ok = (name, cond, detail) => {
+    out.push((cond ? "PASS - " : "FAIL - ") + name + (cond || !detail ? "" : " :: " + detail));
+    resultsEl.textContent = "RUNNING (unfinished)\n" + out.join("\n"); // partial progress if it times out
+  };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   async function until(fn, ms = 4000) {
     const end = Date.now() + ms;
     while (Date.now() < end) { try { if (fn()) return true; } catch (e) {} await sleep(25); }
     return false;
   }
-  function loadFrame(width) {
+  function loadFrameEl(width, src) {
     return new Promise((resolve) => {
       const f = document.createElement("iframe");
       f.style.width = width + "px";
       f.style.height = "900px";
-      f.onload = () => resolve(f.contentWindow);
-      f.src = "../index.html";
+      f.onload = () => { f.onload = null; resolve(f); };
+      f.src = src || "../index.html";
       document.body.appendChild(f);
     });
+  }
+  async function loadFrame(width, src) {
+    return (await loadFrameEl(width, src)).contentWindow;
   }
   async function fixtureFile(path) {
     const res = await fetch("../test-fixtures/" + path);
@@ -172,15 +179,207 @@
     const sent = JSON.stringify(events);
     ok("analytics: no file names or cell data sent", !/sales_|june|my_report|\.xlsx|\.csv|Avery|North/i.test(sent), sent);
 
-    // --- Narrow viewport: no horizontal scroll, with results showing ---
-    const m = await loadFrame(375);
-    m.document.getElementById("sample-btn").click();
-    await until(() => !m.document.getElementById("results-panel").classList.contains("hidden"));
-    await sleep(200);
-    const de = m.document.documentElement;
-    ok("375px: no horizontal scroll (with results)", de.scrollWidth <= de.clientWidth, `scrollWidth=${de.scrollWidth} clientWidth=${de.clientWidth}`);
-    const stepsCols = m.getComputedStyle(m.document.querySelector(".steps")).gridTemplateColumns.split(" ").length;
-    ok("375px: steps stacked", stepsCols === 1, String(stepsCols));
+    // --- Stack page: switch link appears once files are loaded ---
+    ok("stack: switch-to-merge link shown after load", !$("switch-note").hidden);
+
+    // ================= Merge into tabs =================
+    const sameCells = (a, b) => {
+      const problems = [];
+      if ((a["!ref"] || "") !== (b["!ref"] || "")) problems.push(`ref ${a["!ref"]} vs ${b["!ref"]}`);
+      new Set(Object.keys(a).concat(Object.keys(b))).forEach((k) => {
+        if (k[0] === "!") return;
+        const x = a[k], y = b[k];
+        if (!x || !y) return problems.push(`${k} missing`);
+        if (x.t !== y.t || x.v !== y.v) problems.push(`${k} ${JSON.stringify([x.t, x.v])} vs ${JSON.stringify([y.t, y.v])}`);
+        else if (x.t === "n" && x.z && x.z !== "General" && x.z !== y.z) problems.push(`${k} format ${x.z} vs ${y.z}`);
+      });
+      return problems;
+    };
+    const FIXTURES = ["region_north.xlsx", "region_south.xlsx", "region_west.xlsx", "Budget [draft] v2.xlsx",
+      "dupes/a/report.xlsx", "dupes/b/report.xlsx", "quarterly_regional_sales_report_2026.xlsx",
+      "mac_1904_dates.xlsx", "customers export.csv"];
+    const toolSources = await Promise.all(FIXTURES.map(async (p) => {
+      const res = await fetch("../test-fixtures/tools/" + p.split("/").map(encodeURIComponent).join("/"));
+      return { name: p.split("/").pop(), bytes: new Uint8Array(await res.arrayBuffer()) };
+    }));
+    const toolFiles = toolSources.map((t) => new File([t.bytes], t.name));
+
+    // Capture downloads in a frame: blobs handed to URL.createObjectURL + the anchor's file name.
+    function captureDownloads(win) {
+      const got = [];
+      let pendingBlob = null;
+      win.URL.createObjectURL = (b) => { pendingBlob = b; return "about:blank"; };
+      win.URL.revokeObjectURL = () => {};
+      win.HTMLAnchorElement.prototype.click = function () { got.push({ name: this.download, blob: pendingBlob }); };
+      return got;
+    }
+    function pick(win, files) {
+      const input = win.document.getElementById("file-input");
+      const dt = new win.DataTransfer();
+      files.forEach((f) => dt.items.add(new win.File([f], f.name)));
+      input.files = dt.files;
+      input.dispatchEvent(new win.Event("change", { bubbles: true }));
+    }
+
+    const mw = await loadFrame(1280, "../merge-into-tabs");
+    const md = mw.document;
+    const mEvents = [];
+    mw.umami = { track: (name, data) => mEvents.push({ name, data }) };
+    const m$ = (id) => md.getElementById(id);
+    const tabNamesShown = () => Array.from(md.querySelectorAll("#tab-order .tab-name")).map((e) => e.textContent);
+    ok("merge: title", md.title === "Merge Excel Files Into One Workbook (Separate Tabs) – StackMySheets", md.title);
+    ok("merge: one h1", md.querySelectorAll("h1").length === 1);
+    ok("merge: canonical", md.querySelector('link[rel="canonical"]').href === "https://stackmysheets.com/merge-into-tabs");
+    ok("merge: nav highlights current tool", md.querySelector('.tool-nav [aria-current="page"]').textContent === "Merge into tabs");
+    ok("merge: privacy note shown", md.querySelector(".privacy-note").textContent.includes("never leave your browser"));
+
+    pick(mw, toolFiles);
+    await until(() => tabNamesShown().length >= 13);
+    const tabNames = tabNamesShown();
+    ok("merge: 13 tabs (empty tab unchecked)", tabNames.length === 13, tabNames.join(" | "));
+    ok("merge: names within 31 chars, unique", tabNames.every((n) => n.length <= 31) && new Set(tabNames.map((n) => n.toLowerCase())).size === tabNames.length, tabNames.join(" | "));
+    ok("merge: name rules applied", ["region_north", "Budget -draft- v2", "report", "report (2)", "quarterly_regional_sa - January", "customers export"].every((n) => tabNames.includes(n)), tabNames.join(" | "));
+    ok("merge: 'Empty' tab listed but unchecked", Array.from(md.querySelectorAll(".sheet-row")).some((r) => r.textContent.includes("Empty") && !r.querySelector("input").checked));
+
+    // Reorder: move the first tab down, focus stays on the moved tab's button
+    md.querySelector('#tab-order .icon-btn[data-dir="1"]').click();
+    ok("merge: move down swaps first two tabs", tabNamesShown()[0] === tabNames[1] && tabNamesShown()[1] === tabNames[0], tabNamesShown().slice(0, 2).join(" | "));
+    ok("merge: focus follows moved tab", md.activeElement && md.activeElement.getAttribute("aria-label") === `Move ${tabNames[0]} down`, md.activeElement && md.activeElement.getAttribute("aria-label"));
+    md.querySelectorAll("#tab-order .icon-btn[data-dir='-1']")[1].click();
+    ok("merge: move up restores order", JSON.stringify(tabNamesShown()) === JSON.stringify(tabNames));
+    ok("merge: first up / last down disabled", md.querySelector("#tab-order .icon-btn[data-dir='-1']").disabled && Array.from(md.querySelectorAll("#tab-order .icon-btn[data-dir='1']")).pop().disabled);
+
+    // Uncheck / recheck a sheet
+    const firstBox = md.querySelector(".sheet-row input");
+    firstBox.click();
+    ok("merge: unchecking removes tab", tabNamesShown().length === 12 && !tabNamesShown().includes("region_north"));
+    firstBox.click();
+    ok("merge: rechecking restores tab in place", JSON.stringify(tabNamesShown()) === JSON.stringify(tabNames));
+
+    const mDownloads = captureDownloads(mw);
+    m$("output-name").value = "all regions";
+    m$("download-btn").click();
+    ok("merge: downloads one .xlsx", mDownloads.length === 1 && mDownloads[0].name === "all regions.xlsx", JSON.stringify(mDownloads.map((d) => d.name)));
+    const mergedBuf = await mDownloads[0].blob.arrayBuffer();
+    const mergedWb = mw.TM.readWorkbook(new mw.Uint8Array(mergedBuf));
+    ok("merge: workbook tabs match list order", JSON.stringify(mergedWb.SheetNames) === JSON.stringify(tabNames), mergedWb.SheetNames.join(" | "));
+
+    // Compare every tab against the original file, parsed independently.
+    // (Bytes made in this harness page are wrapped in the frame's own
+    // Uint8Array; SheetJS doesn't recognize another page's ArrayBuffer.)
+    const originals = [];
+    for (const f of toolSources) {
+      const isCsv = f.name.endsWith(".csv");
+      const src = isCsv ? new TextDecoder().decode(f.bytes) : new mw.Uint8Array(f.bytes);
+      const wb = mw.TM.readWorkbook(src, { isCsv });
+      wb.SheetNames.forEach((n) => { if (Object.keys(wb.Sheets[n]).some((k) => k[0] !== "!")) originals.push(wb.Sheets[n]); });
+    }
+    const mergeProblems = [];
+    originals.forEach((ws, i) => sameCells(ws, mergedWb.Sheets[tabNames[i]]).forEach((p) => mergeProblems.push(`${tabNames[i]}: ${p}`)));
+    ok("merge: every cell matches the originals (values, types, formats)", originals.length === 13 && mergeProblems.length === 0, mergeProblems.slice(0, 5).join("; "));
+    const north = mergedWb.Sheets.region_north;
+    ok("merge: spot check — ID text, padded zip, date", north.A2.v === "00121" && north.B2.w === "02134" && north.C2.w === "2026-01-15", JSON.stringify([north.A2, north.B2, north.C2]));
+    ok("merge: spot check — CSV leading zeros + date text", mergedWb.Sheets["customers export"].A2.v === "00123" && mergedWb.Sheets["customers export"].B2.v === "2026-01-15");
+    ok("merge: spot check — 1904 date corrected", mergedWb.Sheets.mac_1904_dates.B2.w === "2026-01-15", JSON.stringify(mergedWb.Sheets.mac_1904_dates.B2));
+    ok("merge: formulas dropped, values kept", mergedWb.Sheets.region_west.G2.v === 2469 && !Object.keys(mergedWb.Sheets).some((n) => Object.values(mergedWb.Sheets[n]).some((c) => c && c.f)));
+    ok("merge: analytics event", JSON.stringify(mEvents) === JSON.stringify([{ name: "download_clicked", data: { tool: "merge", format: "xlsx" } }]), JSON.stringify(mEvents));
+
+    // ================= Split =================
+    const sw = await loadFrame(1280, "../split");
+    const sd = sw.document;
+    const sEvents = [];
+    sw.umami = { track: (name, data) => sEvents.push({ name, data }) };
+    const s$ = (id) => sd.getElementById(id);
+    const fileList = () => Array.from(sd.querySelectorAll("#file-name-list li")).map((e) => e.textContent);
+    ok("split: title", sd.title === "Split Excel Tabs Into Separate Files – StackMySheets", sd.title);
+    ok("split: canonical", sd.querySelector('link[rel="canonical"]').href === "https://stackmysheets.com/split");
+    ok("split: nav highlights current tool", sd.querySelector('.tool-nav [aria-current="page"]').textContent === "Split workbook");
+
+    pick(sw, [new File([await (await fetch("../test-fixtures/tools/customers%20export.csv")).arrayBuffer()], "customers export.csv")]);
+    await until(() => s$("status-line").classList.contains("error"));
+    ok("split: CSV rejected with explanation", s$("status-line").textContent.includes("only one sheet"), s$("status-line").textContent);
+
+    // Round trip: split the workbook downloaded from Merge into tabs
+    pick(sw, [new File([mergedBuf], "all regions.xlsx")]);
+    await until(() => fileList().length === 13);
+    ok("split: lists all 13 tabs as files", fileList().length === 13, fileList().join(" | "));
+    ok("split: file names made safe", fileList().includes('quarterly_ - Q1 _Final_ _draft_.xlsx') && fileList().includes("report (2).xlsx"), fileList().join(" | "));
+    const sDownloads = captureDownloads(sw);
+    s$("download-btn").click();
+    await until(() => sDownloads.length === 1);
+    ok("split: one .zip download", sDownloads.length === 1 && sDownloads[0].name === "all regions - tabs.zip", JSON.stringify(sDownloads.map((d) => d.name)));
+    const zip = await sw.JSZip.loadAsync(await sDownloads[0].blob.arrayBuffer());
+    const zipNames = Object.keys(zip.files);
+    ok("split: zip holds one .xlsx per tab, names as listed", JSON.stringify(zipNames.slice().sort()) === JSON.stringify(fileList().slice().sort()), zipNames.join(" | "));
+    const splitProblems = [];
+    for (let i = 0; i < fileList().length; i++) {
+      const wb = sw.TM.readWorkbook(new sw.Uint8Array(await zip.file(fileList()[i]).async("arraybuffer")));
+      if (wb.SheetNames[0] !== tabNames[i]) splitProblems.push(`${fileList()[i]} tab name ${wb.SheetNames[0]}`);
+      sameCells(originals[i], wb.Sheets[wb.SheetNames[0]]).forEach((p) => splitProblems.push(`${fileList()[i]}: ${p}`));
+    }
+    ok("split: round trip — every file matches the original sheet", splitProblems.length === 0, splitProblems.slice(0, 5).join("; "));
+    ok("split: unicode file name survives zip", zipNames.some((n) => n.includes("Café São Paulo")), zipNames.join(" | "));
+
+    s$("format-csv").click();
+    ok("split: CSV names", fileList().every((n) => n.endsWith(".csv")));
+    s$("download-btn").click();
+    await until(() => sDownloads.length === 2);
+    const csvZip = await sw.JSZip.loadAsync(await sDownloads[1].blob.arrayBuffer());
+    const custCsv = await csvZip.file("customers export.csv").async("string");
+    ok("split csv: leading zeros, dates, long IDs as written", custCsv.split("\n")[1] === '00123,2026-01-15,01/02/2026,1234.5,12345678901234567890,"1,234",Café', custCsv.split("\n")[1]);
+    const northCsv = await csvZip.file("region_north.csv").async("string");
+    ok("split csv: formatted values as displayed", northCsv.split("\n")[1].startsWith("00121,02134,2026-01-15"), northCsv.split("\n")[1]);
+
+    // Single tab -> direct file, no zip
+    s$("format-xlsx").click();
+    Array.from(sd.querySelectorAll(".sheet-row input")).slice(1).forEach((b) => { if (b.checked) b.click(); });
+    ok("split: one tab -> direct download label", s$("download-btn").textContent === "Download region_north.xlsx", s$("download-btn").textContent);
+    s$("download-btn").click();
+    await until(() => sDownloads.length === 3);
+    ok("split: one tab downloads .xlsx directly", sDownloads[2].name === "region_north.xlsx");
+    ok("split: analytics events", JSON.stringify(sEvents.map((e) => e.data.format)) === '["xlsx","csv","xlsx"]' && sEvents.every((e) => e.name === "download_clicked" && e.data.tool === "split"), JSON.stringify(sEvents));
+
+    s$("sample-btn").click();
+    await until(() => fileList().length === 3);
+    ok("split: sample workbook loads", fileList().join("|") === "Downtown.xlsx|Airport.xlsx|Online.xlsx", fileList().join("|"));
+
+    // ================= Hand-off: Stack -> Merge into tabs =================
+    const hf = await loadFrameEl(1280, "../index.html");
+    hf.contentDocument.getElementById("sample-btn").click();
+    await until(() => !hf.contentDocument.getElementById("switch-note").hidden);
+    const navigated = new Promise((r) => { hf.onload = () => r(true); });
+    hf.contentDocument.getElementById("switch-to-merge").click();
+    const didNavigate = await Promise.race([navigated, sleep(8000).then(() => false)]);
+    ok("handoff: link navigates to merge page", didNavigate, "no navigation within 8s; still at " + hf.contentWindow.location.pathname);
+    const hw = hf.contentWindow;
+    ok("handoff: landed on merge page", hw.location.pathname === "/merge-into-tabs", hw.location.pathname);
+    await until(() => hw.document.querySelectorAll("#tab-order .tab-item").length === 6);
+    ok("handoff: files carried over (6 tabs)", hw.document.querySelectorAll("#tab-order .tab-item").length === 6);
+    ok("handoff: status says files came from Stack", hw.document.getElementById("status-line").textContent.startsWith("Brought over 3 files from Stack sheets."), hw.document.getElementById("status-line").textContent);
+    ok("handoff: stored copy deleted after use", (await hw.SMS.takeHandoff()).length === 0);
+
+    // ================= Nothing leaves the browser =================
+    const frames = [w, mw, sw, hw];
+    const external = [];
+    frames.forEach((fw) => fw.performance.getEntriesByType("resource").forEach((e) => {
+      const u = new URL(e.name);
+      if (u.origin !== fw.location.origin && u.href !== "https://cloud.umami.is/script.js") external.push(u.href);
+    }));
+    ok("no requests to other servers (besides the Umami script)", external.length === 0, external.join(" "));
+
+    // ================= Phone width (375px) =================
+    for (const [page, loadBtn, readyId] of [["../index.html", "sample-btn", "results-panel"], ["../merge-into-tabs", "sample-btn", "tabs-panel"], ["../split", "sample-btn", "output-panel"]]) {
+      const pw = await loadFrame(375, page);
+      pw.document.getElementById(loadBtn).click();
+      await until(() => !pw.document.getElementById(readyId).classList.contains("hidden"));
+      await sleep(200);
+      const de = pw.document.documentElement;
+      ok(`375px ${page}: no horizontal scroll (with content)`, de.scrollWidth <= de.clientWidth, `scrollWidth=${de.scrollWidth} clientWidth=${de.clientWidth}`);
+      const stepsCols = pw.getComputedStyle(pw.document.querySelector(".steps")).gridTemplateColumns.split(" ").length;
+      ok(`375px ${page}: steps stacked`, stepsCols === 1, String(stepsCols));
+      const navTops = new Set(Array.from(pw.document.querySelectorAll(".tool-nav a")).map((a) => Math.round(a.getBoundingClientRect().top)));
+      ok(`375px ${page}: nav fits on one row`, navTops.size === 1, [...navTops].join(","));
+    }
   } catch (err) {
     ok("harness error", false, err && (err.stack || err.message || err));
   }

@@ -11,8 +11,9 @@ function run() {
 
   var REPO = "/Users/mockasingo/Documents/tabmerger";
 
+  // Read as UTF-8 (app.read() assumes MacRoman and mangles non-ASCII text).
   function readText(path) {
-    return app.read(Path(path));
+    return $.NSString.stringWithContentsOfFileEncodingError(path, $.NSUTF8StringEncoding, $()).js;
   }
 
   function b64OfFile(path) {
@@ -162,6 +163,158 @@ function run() {
   assertEqual("case-insensitive headers: second sheet values land under canonical column", caseMerged.rows[1].Amount, 20);
 
   // ---------------------------------------------------------------------
+  // 8. Values: CSV leading zeros/dates/long IDs, formats, formulas, 1904 dates
+  // ---------------------------------------------------------------------
+  var T = REPO + "/test-fixtures/tools/";
+  function fixtureBuffer(path) {
+    var bin = atobPolyfill(b64OfFile(path));
+    var buf = new ArrayBuffer(bin.length);
+    var view = new Uint8Array(buf);
+    for (var i = 0; i < bin.length; i++) view[i] = bin.charCodeAt(i);
+    return buf;
+  }
+  function fixtureSheets(name) {
+    if (/\.csv$/.test(name)) return csvSheets(readText(T + name), name.split("/").pop());
+    var fileName = name.split("/").pop();
+    return TM.parseSheetsFromSource(fixtureBuffer(T + name), { fileName: fileName, fileLabel: fileName });
+  }
+  function str(v) { return v === undefined || v === null ? "" : String(v); }
+
+  var csvRow = fixtureSheets("customers export.csv")[0].rows[0];
+  assertEqual("csv: leading-zero ID stays text", csvRow["Customer ID"], "00123");
+  assertEqual("csv: ISO date kept as written", csvRow["Signup date"], "2026-01-15");
+  assertEqual("csv: US date kept as written", csvRow["US date"], "01/02/2026");
+  assertEqual("csv: plain number becomes number", csvRow.Amount, 1234.5);
+  assertEqual("csv: 20-digit ID stays text (no precision loss)", csvRow["Card ref"], "12345678901234567890");
+  assertEqual("csv: thousands separator stays text", csvRow.Formatted, "1,234");
+  assertEqual("csv: accented text intact", csvRow.City, "Café");
+  assertEqual("csv: lone 0 becomes number", fixtureSheets("customers export.csv")[0].rows[2]["Customer ID"], 0);
+
+  var north = fixtureSheets("region_north.xlsx")[0];
+  var nRow = north.rows[0];
+  assertEqual("xlsx: text ID keeps zeros", nRow["Customer ID"], "00121");
+  assert("xlsx: zero-padded number keeps format", nRow.Zip instanceof TM.FormattedNumber && nRow.Zip.v === 2134 && str(nRow.Zip) === "02134", JSON.stringify(nRow.Zip));
+  assert("xlsx: date keeps serial + format", nRow["Order date"] instanceof TM.FormattedNumber && nRow["Order date"].v === 46037 && str(nRow["Order date"]) === "2026-01-15", JSON.stringify(nRow["Order date"]));
+  assertEqual("xlsx: accented text intact", nRow.Note, "Café");
+
+  var stacked = TM.consolidate([north].concat(fixtureSheets("region_south.xlsx")), { strategy: "union" });
+  var outWs = TM.buildWorkbook(stacked.columns, stacked.rows).Sheets.Consolidated;
+  assertEqual("stack output: date cell is a formatted number", [outWs.C2.t, outWs.C2.v, outWs.C2.z], ["n", 46037, "yyyy-mm-dd"]);
+  assertEqual("stack output: zip keeps 00000 format", [outWs.B2.v, outWs.B2.z], [2134, "00000"]);
+  assertEqual("stack output: second file's m/d/yyyy date keeps its format", [outWs.C5.v, outWs.C5.z], [46037, "m/d/yyyy"]);
+  var stackedCsv = TM.sheetToCsv(stacked.columns, stacked.rows);
+  assert("stack csv: shows dates and zero-padded zips as displayed", stackedCsv.indexOf("00121,02134,2026-01-15") !== -1 && stackedCsv.indexOf("1/15/2026") !== -1, stackedCsv.split("\n")[1]);
+
+  var west = fixtureSheets("region_west.xlsx")[0];
+  assertEqual("formula: cached value kept", west.rows[0].Double, 2469);
+  assert("formula: formula dropped", west.worksheet.G2.f === undefined);
+
+  var mac = fixtureSheets("mac_1904_dates.xlsx")[0];
+  assert("1904 dates: shifted to 1900 system", mac.rows[0].When.v === 46037 && str(mac.rows[0].When) === "2026-01-15", JSON.stringify(mac.rows[0].When));
+
+  // ---------------------------------------------------------------------
+  // 9. Excel tab names
+  // ---------------------------------------------------------------------
+  function tab(fileName, sheetName, sheetCount, isCsv) {
+    return { fileName: fileName, sheetName: sheetName, sheetCount: sheetCount, isCsv: !!isCsv };
+  }
+  var names = TM.excelTabNames([
+    tab("region_north.xlsx", "Data", 1),
+    tab("customers export.csv", "Sheet1", 1, true),
+    tab("sales.xlsx", "January", 3),
+    tab("quarterly_regional_sales_report_2026.xlsx", "January", 6),
+    tab("quarterly_regional_sales_report_2026.xlsx", "Summary for leadership review", 6),
+    tab("Budget [draft] v2.xlsx", "Sheet1", 1),
+    tab("a:b/c\\d?e*f.xlsx", "x", 1),
+    tab("report.xlsx", "Report", 1),
+    tab("REPORT.xlsx", "Report", 1),
+    tab("'quoted'.xlsx", "x", 1),
+    tab("history.xlsx", "x", 1),
+    tab(".xlsx", "x", 1),
+  ]);
+  assertEqual("tab names", names, [
+    "region_north",
+    "customers export",
+    "sales - January",
+    "quarterly_regional_sa - January",
+    "quarterly_ - Summary for leader",
+    "Budget -draft- v2",
+    "a-b-c-d-e-f",
+    "report",
+    "REPORT (2)",
+    "quoted",
+    "History-",
+    "Sheet",
+  ]);
+  assert("tab names: all within 31 chars", names.every(function (n) { return n.length <= 31; }));
+
+  var longDupes = TM.excelTabNames([
+    tab("abcdefghijklmnopqrstuvwxyz0123456789.xlsx", "x", 1),
+    tab("abcdefghijklmnopqrstuvwxyz0123456789.xlsx", "x", 1),
+    tab("abcdefghijklmnopqrstuvwxyz0123456789.xlsx", "x", 1),
+  ]);
+  assertEqual("tab names: long duplicates truncated to fit suffix", longDupes, [
+    "abcdefghijklmnopqrstuvwxyz01234",
+    "abcdefghijklmnopqrstuvwxyz0 (2)",
+    "abcdefghijklmnopqrstuvwxyz0 (3)",
+  ]);
+
+  // ---------------------------------------------------------------------
+  // 10. Split file names
+  // ---------------------------------------------------------------------
+  assertEqual("file names", TM.safeFileNames(['Q1 "Final" <draft>|v2', "Data", "data", "CON", "Ends with dot.", "", "Café São Paulo"], ".xlsx"), [
+    "Q1 _Final_ _draft__v2.xlsx",
+    "Data.xlsx",
+    "data (2).xlsx",
+    "CON_.xlsx",
+    "Ends with dot.xlsx",
+    "Sheet.xlsx",
+    "Café São Paulo.xlsx",
+  ]);
+
+  // ---------------------------------------------------------------------
+  // 11. Round trip: merge every fixture into tabs, split back out, compare
+  // ---------------------------------------------------------------------
+  function sameCells(a, b) {
+    var problems = [];
+    if ((a["!ref"] || "") !== (b["!ref"] || "")) problems.push("ref " + a["!ref"] + " vs " + b["!ref"]);
+    Object.keys(a).concat(Object.keys(b)).forEach(function (k) {
+      if (k.charAt(0) === "!") return;
+      var x = a[k], y = b[k];
+      if (!x || !y) { problems.push(k + " missing"); return; }
+      if (x.t !== y.t || x.v !== y.v) problems.push(k + " " + JSON.stringify([x.t, x.v]) + " vs " + JSON.stringify([y.t, y.v]));
+      else if (x.t === "n" && x.z && x.z !== "General" && x.z !== y.z) problems.push(k + " format " + x.z + " vs " + y.z);
+    });
+    return problems;
+  }
+  var fixtureNames = ["region_north.xlsx", "region_south.xlsx", "region_west.xlsx", "Budget [draft] v2.xlsx",
+    "dupes/a/report.xlsx", "dupes/b/report.xlsx", "quarterly_regional_sales_report_2026.xlsx",
+    "mac_1904_dates.xlsx", "customers export.csv"];
+  var originals = [];
+  fixtureNames.forEach(function (n) { originals = originals.concat(fixtureSheets(n)); });
+  var tabNames = TM.excelTabNames(originals);
+  var merged = TM.buildTabbedWorkbook(originals.map(function (s, i) { return { name: tabNames[i], worksheet: s.worksheet }; }));
+  var reread = TM.readWorkbook(TM.workbookToArray(merged));
+  assertEqual("round trip: merged tab names in order", reread.SheetNames, tabNames);
+  var mergeProblems = [];
+  originals.forEach(function (s, i) {
+    sameCells(s.worksheet, reread.Sheets[tabNames[i]]).forEach(function (p) { mergeProblems.push(tabNames[i] + ": " + p); });
+  });
+  assertEqual("round trip: merged workbook matches originals cell for cell", mergeProblems, []);
+
+  var splitFiles = TM.splitSheets(reread.SheetNames.map(function (n) { return { sheetName: n, worksheet: reread.Sheets[n] }; }), "xlsx");
+  assertEqual("round trip: one file per tab", splitFiles.length, originals.length);
+  var splitProblems = [];
+  splitFiles.forEach(function (f, i) {
+    var wb = TM.readWorkbook(f.data);
+    sameCells(originals[i].worksheet, wb.Sheets[wb.SheetNames[0]]).forEach(function (p) { splitProblems.push(f.fileName + ": " + p); });
+  });
+  assertEqual("round trip: split files match originals cell for cell", splitProblems, []);
+
+  var csvFiles = TM.splitSheets([{ sheetName: "Data", worksheet: north.worksheet }], "csv");
+  assertEqual("split csv: values as displayed", csvFiles[0].data.split("\n")[1], "00121,02134,2026-01-15,\"1,234.50\",25%,Café");
+
+    // ---------------------------------------------------------------------
   // Summary
   // ---------------------------------------------------------------------
   results.push("");

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Split Excel Tabs Into Separate Files – StackMySheets</title>
+<meta name="description" content="Split an Excel workbook into separate files, one per tab, downloaded together as a .zip of .xlsx or .csv files. Runs in your browser; nothing is uploaded." />
+<link rel="canonical" href="https://stackmysheets.com/split" />
+<meta name="theme-color" content="#0f1420" />
+<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="StackMySheets" />
+<meta property="og:url" content="https://stackmysheets.com/split" />
+<meta property="og:title" content="Split Excel Tabs Into Separate Files – StackMySheets" />
+<meta property="og:description" content="Turn every tab of an Excel workbook into its own .xlsx or .csv file, right in your browser. Nothing is uploaded." />
+<meta property="og:image" content="https://stackmysheets.com/og-split.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="StackMySheets: split a workbook into one file per tab." />
+<meta name="twitter:card" content="summary_large_image" />
+
+<link rel="stylesheet" href="style.css" />
+<script defer src="https://cloud.umami.is/script.js" data-website-id="0e74c9a4-68c1-4934-b1d6-81c0df1d4d6a" data-domains="stackmysheets.com"></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="./" aria-label="StackMySheets home">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h5c3 0 4 6 7.5 6M3 12h12.5M3 18h5c3 0 4-6 7.5-6" />
+          <path d="M15.5 12H21" stroke-width="2.6" />
+        </svg>
+      </span>
+      <span class="brand-name">StackMySheets</span>
+    </a>
+    <nav class="tool-nav" aria-label="Tools">
+      <a href="./">Stack sheets</a>
+      <a href="merge-into-tabs">Merge into tabs</a>
+      <a href="split" aria-current="page">Split workbook</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <h1>Split a workbook into one file per tab.</h1>
+    <p class="hero-sub">Drop in an Excel file and download each tab as its own .xlsx or .csv. Everything runs in your browser, so nothing is uploaded.</p>
+  </section>
+
+  <main class="layout">
+    <section class="panel input-panel" aria-label="Add a workbook">
+      <div class="dropzone" id="dropzone" tabindex="0" aria-label="Drop zone. Press Enter to choose a workbook, or drag and drop one here." aria-describedby="dropzone-hint">
+        <svg class="dropzone-icon" viewBox="0 0 48 48" width="48" height="48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M14 10V8a2 2 0 0 1 2-2h22a2 2 0 0 1 2 2v26a2 2 0 0 1-2 2h-2" opacity="0.55" />
+          <path d="M10 14v-2a2 2 0 0 1 2-2h22a2 2 0 0 1 2 2v26a2 2 0 0 1-2 2h-2" opacity="0.8" />
+          <rect x="6" y="14" width="26" height="28" rx="2" />
+          <path d="M6 22h26M15 22v20M6 30h26" />
+        </svg>
+        <button type="button" class="primary-btn choose-btn" id="choose-files-btn">Choose a workbook</button>
+        <p class="dropzone-text">or drag &amp; drop an Excel file here</p>
+        <p class="dropzone-hint" id="dropzone-hint">Supports .xlsx and .xls</p>
+        <input type="file" id="file-input" accept=".xlsx,.xls" hidden />
+      </div>
+      <div class="dropzone-footer">
+        <p class="privacy-note">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="5" y="11" width="14" height="10" rx="2" />
+            <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+          </svg>
+          Your files never leave your browser
+        </p>
+        <button type="button" class="secondary-btn" id="sample-btn">Try with a sample workbook</button>
+      </div>
+      <div class="status-line" id="status-line" role="status" aria-live="polite"></div>
+    </section>
+
+    <section class="panel sheets-panel hidden" id="sheets-panel">
+      <div class="panel-header">
+        <h2>Tabs in this workbook</h2>
+        <button class="ghost-btn" id="clear-all-btn">Clear</button>
+      </div>
+      <p class="panel-sub">Each checked tab becomes its own file. Empty tabs are unchecked by default.</p>
+      <ul class="file-group-list" id="sheet-groups"></ul>
+    </section>
+
+    <section class="panel output-panel hidden" id="output-panel">
+      <div class="panel-header">
+        <h2>Files to download</h2>
+        <div class="summary-chips" id="summary-chips"></div>
+      </div>
+      <fieldset class="format-fieldset">
+        <legend>Format</legend>
+        <label class="strategy-row">
+          <input type="radio" name="format" value="xlsx" id="format-xlsx" checked />
+          Excel (.xlsx) <span class="source-meta">— keeps dates and number formats</span>
+        </label>
+        <label class="strategy-row">
+          <input type="radio" name="format" value="csv" id="format-csv" />
+          CSV (.csv) <span class="source-meta">— values as they're displayed</span>
+        </label>
+      </fieldset>
+      <ul class="file-name-list" id="file-name-list"></ul>
+      <p class="empty-note hidden" id="no-files-note">Check at least one tab to split.</p>
+      <div class="export-row">
+        <button class="primary-btn" id="download-btn">Download .zip</button>
+      </div>
+    </section>
+  </main>
+
+  <div class="content">
+    <section class="how" aria-labelledby="how-title">
+      <h2 id="how-title">How it works</h2>
+      <ol class="steps">
+        <li class="step">
+          <span class="step-num" aria-hidden="true">1</span>
+          <h3>Drop your workbook</h3>
+          <p>Add one .xlsx or .xls file with several tabs.</p>
+        </li>
+        <li class="step">
+          <span class="step-num" aria-hidden="true">2</span>
+          <h3>Pick the tabs</h3>
+          <p>Every tab is listed. Uncheck any you don't need, and choose Excel or CSV.</p>
+        </li>
+        <li class="step">
+          <span class="step-num" aria-hidden="true">3</span>
+          <h3>Download the files</h3>
+          <p>Get one file per tab, named after the tab, together in a .zip.</p>
+        </li>
+      </ol>
+      <p class="audience">Useful for sending <strong>each region</strong>, <strong>each client</strong> or <strong>each month</strong> its own file, or for loading tabs into tools that only accept one sheet.</p>
+    </section>
+
+    <section class="faq" aria-labelledby="faq-title">
+      <h2 id="faq-title">FAQ</h2>
+      <details>
+        <summary>Is my data uploaded anywhere?</summary>
+        <div class="faq-body">
+          <p>No. Your browser reads the workbook, creates the files and zips them on your own device. StackMySheets has no server that receives files, so your data never leaves the browser tab.</p>
+        </div>
+      </details>
+      <details>
+        <summary>How are the files named?</summary>
+        <div class="faq-body">
+          <p>Each file is named after its tab. Characters that aren't allowed in file names, such as <code>/ : * ? " &lt; &gt; |</code>, are replaced with an underscore, and repeated names get “ (2)”, “ (3)” and so on. If you pick only one tab, you get that file directly instead of a .zip.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Should I choose Excel or CSV?</summary>
+        <div class="faq-body">
+          <p>Excel files keep each cell's value and number format, so dates stay dates and IDs like 00123 keep their zeros. CSV files contain each value as it's displayed in the workbook, which most other tools can read.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Are formulas and formatting kept?</summary>
+        <div class="faq-body">
+          <p>Formulas are replaced by their last calculated values, because a formula that refers to another tab would break once that tab is in a separate file. Number formats are kept in .xlsx files; fonts, colors and other styling are not.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Can I put files back together?</summary>
+        <div class="faq-body">
+          <p>Yes. <a href="merge-into-tabs">Merge into tabs</a> combines files into one workbook with a tab each, and <a href="./">Stack sheets</a> stacks their rows into one sheet.</p>
+        </div>
+      </details>
+    </section>
+  </div>
+
+  <footer class="site-footer">
+    <nav class="footer-nav" aria-label="All tools">
+      <a href="./">Stack sheets</a>
+      <a href="merge-into-tabs">Merge into tabs</a>
+      <a href="split">Split workbook</a>
+    </nav>
+    <p>Combine, merge and split spreadsheets in your browser. Free, no sign-up, nothing uploaded.</p>
+  </footer>
+
+  <script src="vendor/xlsx.full.min.js"></script>
+  <script src="vendor/jszip.min.js"></script>
+  <script src="core.js"></script>
+  <script src="ui.js"></script>
+  <script src="split.js"></script>
+</body>
+</html>
